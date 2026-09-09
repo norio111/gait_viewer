@@ -374,11 +374,14 @@ function once(target, type) {
 function fitToVideo() {
   const w = dom.video.videoWidth || 640;
   const h = dom.video.videoHeight || 360;
-  dom.overlay.width = buffer.width = w;
-  dom.overlay.height = buffer.height = h;
-  // Match the container to the real aspect ratio so portrait phone footage is
-  // not squeezed into a landscape box, then cap the height: a 9:16 clip at full
-  // column width would otherwise run well past the bottom of the window.
+
+  const scale = Math.min(1, 720 / Math.max(w, h));
+  const cw = Math.max(1, Math.round(w * scale));
+  const ch = Math.max(1, Math.round(h * scale));
+
+  dom.overlay.width = buffer.width = cw;
+  dom.overlay.height = buffer.height = ch;
+
   dom.viewer.style.aspectRatio = `${w} / ${h}`;
   dom.viewer.style.setProperty("--ar", String(w / h));
 }
