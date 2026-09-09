@@ -500,12 +500,18 @@ function renderAt(t) {
   dom.scrub.value = d ? Math.round((t / d) * 1000) : 0;
 }
 
+let lastIndex = -1;
+
 function loop() {
   if (!state.playing) return;
-  renderAt(dom.video.currentTime);
+  const i = indexAt(dom.video.currentTime);
+  if (i !== lastIndex) {
+    lastIndex = i;
+    renderAt(dom.video.currentTime);
+  }
   requestAnimationFrame(loop);
 }
-
+  
 dom.playBtn.addEventListener("click", () => {
   if (dom.video.paused) {
     dom.video.playbackRate = parseFloat(dom.speedSelect.value);
@@ -514,7 +520,7 @@ dom.playBtn.addEventListener("click", () => {
     dom.video.pause();
   }
 });
-dom.video.addEventListener("play", () => { state.playing = true; dom.playBtn.textContent = "一時停止"; loop(); });
+dom.video.addEventListener("play", () => { state.playing = true; dom.playBtn.textContent = "一時停止"; lastIndex = -1; loop(); });
 dom.video.addEventListener("pause", () => { state.playing = false; dom.playBtn.textContent = "再生"; renderAt(dom.video.currentTime); });
 dom.video.addEventListener("ended", () => { state.playing = false; dom.playBtn.textContent = "再生"; });
 dom.speedSelect.addEventListener("change", () => { dom.video.playbackRate = parseFloat(dom.speedSelect.value); });
@@ -571,6 +577,7 @@ function reset() {
   dom.qualityWrap.classList.remove("low");
   dom.timeLabel.textContent = "0.00 / 0.00 s";
   dom.progressBar.style.width = "0";
+  lastIndex = -1;
   dom.stageError.hidden = true;
   enableTransport(false);
   Draw.clear(ctx, dom.overlay.width, dom.overlay.height);
