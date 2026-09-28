@@ -117,8 +117,10 @@
   .status b { font-family: var(--mono); font-weight: 500; color: var(--text); font-size: 15px; }
   .status .low b { color: var(--warn); }
 
-  .progress { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 12px; }
-  .progress i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+  .progress { margin-top: 12px; font-size: 13px; color: var(--text); }
+  .progress .bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 5px; }
+  .progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+  .progress small { display: block; color: var(--muted); font-size: 12px; }
 
   .err { color: var(--warn); font-size: 13px; margin: 14px 0 0; }
   .loading { font-size: 13px; color: var(--muted); margin-top: 12px; }
@@ -153,7 +155,11 @@
       </div>
     </div>
 
-    <div class="progress" id="progressWrap" hidden><i id="progressBar"></i></div>
+    <div class="progress" id="progressWrap" role="status" aria-live="polite" hidden>
+      <span id="progressText">動画を読み込み中…</span>
+      <div class="bar"><i id="progressBar"></i></div>
+      <small id="progressDetail"></small>
+    </div>
 
     <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="再生位置" disabled />
 
@@ -316,7 +322,8 @@ const dom = {
   dropZone: el("dropZone"), pickBtn: el("pickBtn"), fileInput: el("fileInput"), modelStatus: el("modelStatus"),
   mirrorInput: el("mirrorInput"), flipBtn: el("flipBtn"), sizeSelect: el("sizeSelect"),
   stage: el("stage"), viewer: el("viewer"), video: el("video"), overlay: el("overlay"),
-  progressWrap: el("progressWrap"), progressBar: el("progressBar"), scrub: el("scrub"),
+  progressWrap: el("progressWrap"), progressBar: el("progressBar"),
+  progressText: el("progressText"), progressDetail: el("progressDetail"), scrub: el("scrub"),
   playBtn: el("playBtn"), prevBtn: el("prevBtn"), nextBtn: el("nextBtn"), speedSelect: el("speedSelect"),
   trailBtn: el("trailBtn"), maskBtn: el("maskBtn"), resetBtn: el("resetBtn"),
   frame: el("frame"), zoomIn: el("zoomIn"), zoomOut: el("zoomOut"), zoomReset: el("zoomReset"),
@@ -358,14 +365,24 @@ dom.fileInput.addEventListener("change", async () => {
   if (!state.modelReady) { dom.modelStatus.textContent = "モデルの読み込みが終わるまで待ってください"; return; }
   reset();
   state.mirror = dom.mirrorInput.checked;
-  state.url = URL.createObjectURL(file);
-  dom.video.src = state.url;
-  dom.video.load();
-  await once(dom.video, "loadedmetadata");
-  fitToVideo();
   dom.dropZone.hidden = true;
   dom.stage.hidden = false;
-  await analyze();
+  dom.progressWrap.hidden = false;
+  dom.progressText.textContent = "動画を読み込み中…";
+  const loadStart = performance.now();
+  try {
+    state.url = URL.createObjectURL(file);
+    dom.video.src = state.url;
+    dom.video.load();
+    await once(dom.video, "loadedmetadata");
+    fitToVideo();
+    await analyze((performance.now() - loadStart) / 1000);
+  } catch (err) {
+    dom.progressText.textContent = "動画の読み込みに失敗しました";
+    dom.stageError.textContent = "動画を読み込めませんでした。別の動画で試してください。";
+    dom.stageError.hidden = false;
+    console.error(err);
+  }
 });
 
 function once(target, type, timeout = 15000) {
@@ -417,37 +434,57 @@ function applyMirror() {
   dom.viewer.classList.toggle("mirror", state.mirror);
 }
 
-async function analyze() {
+async function analyze(loadSeconds = null) {
   state.frames = [];
   state.ready = false;
   dom.stageError.hidden = true;
   enableTransport(false);
   applyMirror();
   dom.progressWrap.hidden = false;
+  dom.progressBar.style.width = "0";
+  dom.progressText.textContent = "解析を準備中…";
+  dom.progressDetail.textContent = loadSeconds == null ? "再解析" : `動画の読み込み ${loadSeconds.toFixed(1)}秒`;
   dom.video.pause();
   const step = 1 / CONFIG.ANALYSIS_FPS;
   const duration = dom.video.duration;
+  const total = Math.floor(duration * CONFIG.ANALYSIS_FPS) + 1;
+  let seekMs = 0, detectMs = 0;
+  const start = performance.now();
 
   try {
-  for (let t = 0; t <= duration; t += step) {
-    await seekTo(dom.video, t);
-    grabFrame();
-    detectStamp += 1000 / CONFIG.ANALYSIS_FPS;
-    const result = Pose.detect(buffer, detectStamp);
-    const landmarks = result.landmarks?.[0] ?? null;
-    state.frames.push({ t, landmarks, visible: isVisible(landmarks) });
+    for (let n = 0; n < total; n++) {
+      const t = n * step;
+      if (n % 12 === 0) {
+        dom.progressText.textContent = `解析中 ${n} / ${total}コマ（${Math.round(n / total * 100)}%）`;
+        dom.progressDetail.textContent = `動画のコマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
+        // Give Safari a paint opportunity before the next synchronous inference.
+        await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+      }
+      const seekStart = performance.now();
+      await seekTo(dom.video, t);
+      seekMs += performance.now() - seekStart;
+      grabFrame();
+      detectStamp += 1000 / CONFIG.ANALYSIS_FPS;
+      const detectStart = performance.now();
+      const result = Pose.detect(buffer, detectStamp);
+      detectMs += performance.now() - detectStart;
+      const landmarks = result.landmarks?.[0] ?? null;
+      state.frames.push({ t, landmarks, visible: isVisible(landmarks) });
 
-    const pct = Math.min(100, (t / duration) * 100);
-    dom.progressBar.style.width = pct + "%";
-    render(state.frames.length - 1);
-  }
+      const pct = (n + 1) / total * 100;
+      dom.progressBar.style.width = pct + "%";
+      render(state.frames.length - 1);
+    }
+    dom.progressText.textContent = `解析完了 ${state.frames.length}コマ（${((performance.now() - start) / 1000).toFixed(1)}秒）`;
+    dom.progressDetail.textContent = `${loadSeconds == null ? "再解析" : `動画の読み込み ${loadSeconds.toFixed(1)}秒`} ／ コマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
 
   } catch (err) {
+    dom.progressText.textContent = `解析停止 ${state.frames.length} / ${total}コマ`;
+    dom.progressDetail.textContent = `動画のコマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
     dom.stageError.textContent = "解析を最後まで実行できませんでした。別の動画で試すか、ページを再読み込みしてください。";
     dom.stageError.hidden = false;
     console.error(err);
   } finally {
-    dom.progressWrap.hidden = true;
     enableTransport(true);
     dom.flipBtn.disabled = false;
   }
@@ -577,6 +614,8 @@ function reset() {
   dom.qualityWrap.classList.remove("low");
   dom.timeLabel.textContent = "0.00 / 0.00 s";
   dom.progressBar.style.width = "0";
+  dom.progressWrap.hidden = true;
+  dom.progressDetail.textContent = "";
   lastIndex = -1;
   dom.stageError.hidden = true;
   enableTransport(false);
