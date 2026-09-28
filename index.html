@@ -35,15 +35,26 @@
      Each sentence is its own inline-block: the line can only break between
      them, never inside one. */
   .lede { color: var(--muted); font-size: 14px; margin: 0 0 24px; line-break: strict; }
-  .lede span { display: inline-block; }
+  .lede span { display: inline-block; max-width: 100%; }
 
   .drop {
     border: 1px dashed var(--border); border-radius: 10px;
     padding: 56px 20px; text-align: center; background: var(--panel);
   }
   .drop p { color: var(--muted); font-size: 13px; margin: 12px 0 0; }
-  .check { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; margin-top: 14px; cursor: pointer; }
-  .check input { accent-color: var(--accent); }
+  .drop p span { display: inline-block; max-width: 100%; }
+  .check { display: flex; width: fit-content; align-items: center; gap: 9px; color: var(--text); font-size: 14px; margin: 14px auto 0; cursor: pointer; }
+  .check input { accent-color: var(--accent); width: 18px; height: 18px; flex: none; }
+  .check small { display: inline-block; font-size: 13px; white-space: nowrap; }
+  .drop .conditions {
+    max-width: 34em; margin: 20px auto 0; padding-top: 14px;
+    border-top: 1px solid var(--border); color: var(--muted);
+    font-size: 13px; text-align: left;
+  }
+  .drop .conditions h2 { margin: 0; color: var(--text); font-size: 14px; font-weight: 600; }
+  .drop .conditions p { margin: 10px 0 0; }
+  .drop .conditions ul { margin: 8px 0 0; padding-left: 1.4em; }
+  .drop .conditions li { margin-top: 6px; }
 
   button {
     background: var(--accent); color: #fff; border: none; border-radius: 7px;
@@ -53,6 +64,8 @@
   button:hover { background: var(--accent-dim); }
   button:disabled { opacity: 0.35; cursor: not-allowed; }
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #pickBtn { width: min(100%, 320px); min-height: 52px; padding: 12px 18px; font-size: 16px; }
+  #pickBtn small { display: inline-block; margin-left: 4px; font-size: 13px; white-space: nowrap; }
   button.quiet {
     background: transparent; color: var(--text); border: 1px solid var(--border);
     padding: 7px 12px; font-weight: 400;
@@ -85,7 +98,7 @@
     padding: 0; margin: 0; display: flex; align-items: center; justify-content: center;
   }
   #stage.zoom .viewer { --cap: 100dvh; border-radius: 0; }
-  #stage.zoom .status, #stage.zoom .progress, #stage.zoom .err { display: none; }
+  #stage.zoom .status, #stage.zoom .progress:not(.busy), #stage.zoom .err { display: none; }
   #stage.zoom #scrub, #stage.zoom .transport {
     position: fixed; left: 12px; right: 12px; z-index: 51;
     width: auto; margin: 0; transition: opacity 0.25s;
@@ -118,6 +131,14 @@
   .status .low b { color: var(--warn); }
 
   .progress { margin-top: 12px; font-size: 13px; color: var(--text); }
+  .progress.busy {
+    position: fixed; left: 12px; right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px)); z-index: 60;
+    max-width: 796px; margin: 0 auto; padding: 12px 14px;
+    border: 1px solid var(--border); border-radius: 10px;
+    background: rgba(22, 28, 36, 0.97);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  }
   .progress .bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 5px; }
   .progress .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
   .progress small { display: block; color: var(--muted); font-size: 12px; }
@@ -125,6 +146,14 @@
   .err { color: var(--warn); font-size: 13px; margin: 14px 0 0; }
   .loading { font-size: 13px; color: var(--muted); margin-top: 12px; }
   .loading.error { color: var(--warn); }
+  @media (max-width: 480px) {
+    body { padding: 20px 16px; }
+    .drop { padding: 28px 16px; }
+  }
+  @media (pointer: coarse) {
+    .transport button, .zoomctl button, .transport select { min-height: 44px; }
+    .check { min-height: 44px; }
+  }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -132,14 +161,22 @@
 <div class="app">
 
   <h1>歩行フォームビューア</h1>
-  <p class="lede"><span>解析はブラウザ内で完結し、動画は送信されません。</span></p>
+  <p class="lede"><span>動画はこの端末で解析します。</span> <span>外部には送信されません。</span></p>
 
   <section id="dropZone" class="drop">
     <input type="file" id="fileInput" accept="video/*" hidden />
-    <button id="pickBtn">動画を選ぶ</button>
-    <p>1人が全身で映っている歩行動画（mp4 / mov / webm）</p>
-    <label class="check"><input type="checkbox" id="mirrorInput" /> 左右反転して記録されている（インカメラ撮影など）</label>
-    <p id="modelStatus" class="loading">姿勢推定モデルを読み込み中…</p>
+    <button id="pickBtn" disabled>動画を選ぶ<small>（mp4 / mov / webm）</small></button>
+    <label class="check"><input type="checkbox" id="mirrorInput" /> <span>左右反転する<small>（インカメラ撮影など）</small></span></label>
+    <p id="modelStatus" class="loading" role="status" aria-live="polite"><span>骨格表示の準備をしています…</span></p>
+    <section class="conditions" aria-labelledby="conditionsTitle">
+      <h2 id="conditionsTitle">利用条件</h2>
+      <ul>
+        <li>4K動画は端末によって再生や解析が重くなります。1080p以下を推奨します</li>
+        <li>解析時間は動画の長さと端末性能によって変わります。まずは10秒程度からお試しください</li>
+        <li>臨床での診断や定量評価を目的としたツールではありません</li>
+      </ul>
+      <p>使用モデル：MediaPipe Pose Landmarker（Full）</p>
+    </section>
   </section>
 
   <main id="stage" hidden>
@@ -149,17 +186,19 @@
         <canvas id="overlay"></canvas>
       </div>
       <div class="zoomctl">
+        <button id="fullscreenBtn" class="quiet" aria-pressed="false" hidden>全画面</button>
         <button id="zoomOut" class="quiet" aria-label="縮小">−</button>
         <button id="zoomIn" class="quiet" aria-label="拡大">＋</button>
         <button id="zoomReset" class="quiet" disabled>等倍</button>
       </div>
     </div>
 
-    <div class="progress" id="progressWrap" role="status" aria-live="polite" hidden>
+    <div class="progress" id="progressWrap" hidden>
       <span id="progressText">動画を読み込み中…</span>
       <div class="bar"><i id="progressBar"></i></div>
       <small id="progressDetail"></small>
     </div>
+    <p id="analysisAnnouncement" class="sr" aria-live="polite"></p>
 
     <input type="range" id="scrub" min="0" max="1000" value="0" step="1" aria-label="再生位置" disabled />
 
@@ -172,7 +211,7 @@
         <option value="0.5" selected>0.5倍速</option>
         <option value="1">等倍</option>
       </select>
-      <select id="sizeSelect" aria-label="表示サイズ">
+      <select id="sizeSelect" aria-label="表示サイズ" disabled>
         <option value="small">表示：小</option>
         <option value="normal" selected>表示：標準</option>
         <option value="large">表示：大</option>
@@ -323,11 +362,13 @@ const dom = {
   mirrorInput: el("mirrorInput"), flipBtn: el("flipBtn"), sizeSelect: el("sizeSelect"),
   stage: el("stage"), viewer: el("viewer"), video: el("video"), overlay: el("overlay"),
   progressWrap: el("progressWrap"), progressBar: el("progressBar"),
-  progressText: el("progressText"), progressDetail: el("progressDetail"), scrub: el("scrub"),
+  progressText: el("progressText"), progressDetail: el("progressDetail"),
+  analysisAnnouncement: el("analysisAnnouncement"), scrub: el("scrub"),
   playBtn: el("playBtn"), prevBtn: el("prevBtn"), nextBtn: el("nextBtn"), speedSelect: el("speedSelect"),
   trailBtn: el("trailBtn"), maskBtn: el("maskBtn"), resetBtn: el("resetBtn"),
   frame: el("frame"), zoomIn: el("zoomIn"), zoomOut: el("zoomOut"), zoomReset: el("zoomReset"),
   stageError: el("stageError"), timeLabel: el("timeLabel"), qualityWrap: el("qualityWrap"), qualityLabel: el("qualityLabel"),
+  fullscreenBtn: el("fullscreenBtn"),
 };
 
 const ctx = dom.overlay.getContext("2d");
@@ -345,14 +386,24 @@ let detectStamp = 0;
 const state = { modelReady: false, frames: [], ready: false, playing: false, trail: false, mirror: false, url: null };
 
 /* --- Model boot --- */
+function showModelStatus(lines, error = false) {
+  const parts = lines.map((line) => {
+    const span = document.createElement("span");
+    span.textContent = line;
+    return span;
+  });
+  dom.modelStatus.replaceChildren(...parts.flatMap((part, i) => i ? [document.createTextNode(" "), part] : [part]));
+  dom.modelStatus.classList.toggle("error", error);
+}
+
 (async () => {
   try {
     await Pose.load();
     state.modelReady = true;
-    dom.modelStatus.textContent = "モデルの準備ができました";
+    dom.pickBtn.disabled = false;
+    showModelStatus(["解析の準備ができました"]);
   } catch (err) {
-    dom.modelStatus.textContent = "モデルを読み込めませんでした。通信環境を確認して再読み込みしてください。";
-    dom.modelStatus.classList.add("error");
+    showModelStatus(["解析の準備に失敗しました。", "再読み込みしてください。"], true);
     console.error(err);
   }
 })();
@@ -362,12 +413,13 @@ dom.pickBtn.addEventListener("click", () => dom.fileInput.click());
 dom.fileInput.addEventListener("change", async () => {
   const file = dom.fileInput.files[0];
   if (!file) return;
-  if (!state.modelReady) { dom.modelStatus.textContent = "モデルの読み込みが終わるまで待ってください"; return; }
+  if (!state.modelReady) { showModelStatus(["解析の準備が終わるまでお待ちください"]); return; }
   reset();
   state.mirror = dom.mirrorInput.checked;
   dom.dropZone.hidden = true;
   dom.stage.hidden = false;
   dom.progressWrap.hidden = false;
+  dom.progressWrap.classList.add("busy");
   dom.progressText.textContent = "動画を読み込み中…";
   const loadStart = performance.now();
   try {
@@ -378,9 +430,11 @@ dom.fileInput.addEventListener("change", async () => {
     fitToVideo();
     await analyze((performance.now() - loadStart) / 1000);
   } catch (err) {
+    dom.progressWrap.classList.remove("busy");
     dom.progressText.textContent = "動画の読み込みに失敗しました";
     dom.stageError.textContent = "動画を読み込めませんでした。別の動画で試してください。";
     dom.stageError.hidden = false;
+    dom.analysisAnnouncement.textContent = dom.stageError.textContent;
     console.error(err);
   }
 });
@@ -437,11 +491,19 @@ function applyMirror() {
 async function analyze(loadSeconds = null) {
   state.frames = [];
   state.ready = false;
+  dom.fullscreenBtn.hidden = true;
+  dom.sizeSelect.disabled = true;
+  if (dom.stage.classList.contains("zoom")) {
+    dom.sizeSelect.value = "normal";
+    applySize("normal");
+  }
   dom.stageError.hidden = true;
   enableTransport(false);
   applyMirror();
   dom.progressWrap.hidden = false;
+  dom.progressWrap.classList.add("busy");
   dom.progressBar.style.width = "0";
+  dom.analysisAnnouncement.textContent = "";
   dom.progressText.textContent = "解析を準備中…";
   dom.progressDetail.textContent = loadSeconds == null ? "再解析" : `動画の読み込み ${loadSeconds.toFixed(1)}秒`;
   dom.video.pause();
@@ -453,7 +515,7 @@ async function analyze(loadSeconds = null) {
 
   try {
     for (let n = 0; n < total; n++) {
-      const t = n * step;
+      const t = Math.min(n * step, Math.max(0, duration - 0.001));
       if (n % 12 === 0) {
         dom.progressText.textContent = `解析中 ${n} / ${total}コマ（${Math.round(n / total * 100)}%）`;
         dom.progressDetail.textContent = `動画のコマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
@@ -477,14 +539,19 @@ async function analyze(loadSeconds = null) {
     }
     dom.progressText.textContent = `解析完了 ${state.frames.length}コマ（${((performance.now() - start) / 1000).toFixed(1)}秒）`;
     dom.progressDetail.textContent = `${loadSeconds == null ? "再解析" : `動画の読み込み ${loadSeconds.toFixed(1)}秒`} ／ コマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
+    dom.analysisAnnouncement.textContent = "解析が完了しました";
+    dom.fullscreenBtn.hidden = false;
+    dom.sizeSelect.disabled = false;
 
   } catch (err) {
     dom.progressText.textContent = `解析停止 ${state.frames.length} / ${total}コマ`;
     dom.progressDetail.textContent = `動画のコマ移動 ${(seekMs / 1000).toFixed(1)}秒 ／ 姿勢推定 ${(detectMs / 1000).toFixed(1)}秒`;
-    dom.stageError.textContent = "解析を最後まで実行できませんでした。別の動画で試すか、ページを再読み込みしてください。";
+    dom.stageError.textContent = "解析を完了できませんでした。別の動画でお試しください。";
     dom.stageError.hidden = false;
+    dom.analysisAnnouncement.textContent = dom.stageError.textContent;
     console.error(err);
   } finally {
+    dom.progressWrap.classList.remove("busy");
     enableTransport(true);
     dom.flipBtn.disabled = false;
   }
@@ -615,7 +682,11 @@ function reset() {
   dom.timeLabel.textContent = "0.00 / 0.00 s";
   dom.progressBar.style.width = "0";
   dom.progressWrap.hidden = true;
+  dom.progressWrap.classList.remove("busy");
   dom.progressDetail.textContent = "";
+  dom.analysisAnnouncement.textContent = "";
+  dom.fullscreenBtn.hidden = true;
+  dom.sizeSelect.disabled = true;
   lastIndex = -1;
   dom.stageError.hidden = true;
   enableTransport(false);
@@ -737,6 +808,8 @@ function applySize(mode) {
   dom.viewer.classList.toggle("s-small", mode === "small");
   dom.viewer.classList.toggle("s-large", mode === "large");
   dom.stage.classList.toggle("zoom", mode === "zoom");
+  dom.fullscreenBtn.textContent = mode === "zoom" ? "戻る" : "全画面";
+  dom.fullscreenBtn.setAttribute("aria-pressed", String(mode === "zoom"));
   dom.stage.classList.remove("chrome-off");
   if (mode === "zoom") wakeChrome(); else clearTimeout(chromeTimer);
   clampView();
@@ -744,6 +817,10 @@ function applySize(mode) {
   renderAt(dom.video.currentTime);
 }
 dom.sizeSelect.addEventListener("change", () => applySize(dom.sizeSelect.value));
+dom.fullscreenBtn.addEventListener("click", () => {
+  dom.sizeSelect.value = dom.stage.classList.contains("zoom") ? "normal" : "zoom";
+  applySize(dom.sizeSelect.value);
+});
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && dom.stage.classList.contains("zoom")) {
     dom.sizeSelect.value = "normal";
