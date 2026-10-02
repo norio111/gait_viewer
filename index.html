@@ -816,6 +816,7 @@ function applySize(mode) {
   dom.viewer.classList.toggle("s-small", mode === "small");
   dom.viewer.classList.toggle("s-large", mode === "large");
   dom.stage.classList.toggle("zoom", mode === "zoom");
+  dom.video.loop = mode === "zoom";
   dom.fullscreenBtn.textContent = mode === "zoom" ? "戻る" : "全画面";
   dom.fullscreenBtn.setAttribute("aria-pressed", String(mode === "zoom"));
   dom.stage.classList.remove("chrome-off");
